@@ -23,6 +23,22 @@
 #define S_ISLNK(mode) 0
 #endif
 
+#ifndef S_ISSOCK
+#define S_ISSOCK(mode) 0
+#endif
+
+#ifndef S_ISFIFO
+#define S_ISFIFO(mode) 0
+#endif
+
+#ifndef S_ISCHR
+#define S_ISCHR(mode) 0
+#endif
+
+#ifndef S_ISBLK
+#define S_ISBLK(mode) 0
+#endif
+
 #ifndef S_IRUSR
 #define S_IRUSR 00400
 #define S_IWUSR 00200
@@ -41,9 +57,16 @@
 #define S_IXOTH 00001
 #endif
 
+#define ANSI_COLOR_RESET   "\033[0m"
+#define ANSI_COLOR_BLUE    "\033[0;34m"
+#define ANSI_COLOR_GREEN   "\033[0;32m"
+#define ANSI_COLOR_RED     "\033[0;31m"
+#define ANSI_COLOR_MAGENTA "\033[0;35m"
+#define ANSI_COLOR_REVERSE "\033[0;7m"
+
 void print_permissions(mode_t mode) {
     char perms[11];
-    perms[0] = S_ISDIR(mode) ? 'd' : '-';
+    perms[0] = S_ISDIR(mode) ? 'd' : (S_ISLNK(mode) ? 'l' : '-');
     perms[1] = (mode & S_IRUSR) ? 'r' : '-';
     perms[2] = (mode & S_IWUSR) ? 'w' : '-';
     perms[3] = (mode & S_IXUSR) ? 'x' : '-';
@@ -61,6 +84,37 @@ int compare_strings(const void *a, const void *b) {
     const char *str1 = *(const char **)a;
     const char *str2 = *(const char **)b;
     return strcmp(str1, str2);
+}
+
+void print_colored_filename(const char *filename, const char *dir_path) {
+    char fullpath[1024];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", dir_path, filename);
+
+    struct stat file_stat;
+    if (lstat(fullpath, &file_stat) == -1) {
+        printf("%s", filename);
+        return;
+    }
+
+    const char *color = ANSI_COLOR_RESET;
+
+    if (S_ISDIR(file_stat.st_mode)) {
+        color = ANSI_COLOR_BLUE;
+    } else if (S_ISLNK(file_stat.st_mode)) {
+        color = ANSI_COLOR_MAGENTA;
+    } else if (file_stat.st_mode & S_IXUSR || file_stat.st_mode & S_IXGRP || file_stat.st_mode & S_IXOTH) {
+        color = ANSI_COLOR_GREEN;
+    } else if (S_ISCHR(file_stat.st_mode) || S_ISBLK(file_stat.st_mode) || S_ISSOCK(file_stat.st_mode) || S_ISFIFO(file_stat.st_mode)) {
+        color = ANSI_COLOR_REVERSE;
+    } else {
+        size_t len = strlen(filename);
+        if ((len > 4 && strcmp(filename + len - 4, ".tar") == 0) ||
+            (len > 3 && (strcmp(filename + len - 3, ".gz") == 0 || strcmp(filename + len - 4, ".zip") == 0))) {
+            color = ANSI_COLOR_RED;
+        }
+    }
+
+    printf("%s%s%s", color, filename, ANSI_COLOR_RESET);
 }
 
 void do_long_listing(char **files, int count, const char *dir_path) {
@@ -106,11 +160,12 @@ void do_long_listing(char **files, int count, const char *dir_path) {
             printf("%s ", timebuf + 4);
         }
 
-        printf("%s\n", files[i]);
+        print_colored_filename(files[i], dir_path);
+        printf("\n");
     }
 }
 
-void do_column_display(char **files, int count, size_t max_len) {
+void do_column_display(char **files, int count, size_t max_len, const char *dir_path) {
     if (count == 0) return;
 
     int term_width = 80;
@@ -137,14 +192,18 @@ void do_column_display(char **files, int count, size_t max_len) {
         for (int c = 0; c < num_cols; c++) {
             int index = c * num_rows + r;
             if (index < count) {
-                printf("%-*s", col_width, files[index]);
+                int name_len = strlen(files[index]);
+                print_colored_filename(files[index], dir_path);
+                for (int p = name_len; p < col_width; p++) {
+                    printf(" ");
+                }
             }
         }
         printf("\n");
     }
 }
 
-void do_horizontal_display(char **files, int count, size_t max_len) {
+void do_horizontal_display(char **files, int count, size_t max_len, const char *dir_path) {
     if (count == 0) return;
 
     int term_width = 80;
@@ -165,11 +224,15 @@ void do_horizontal_display(char **files, int count, size_t max_len) {
     int current_pos = 0;
 
     for (int i = 0; i < count; i++) {
+        int name_len = strlen(files[i]);
         if (current_pos + col_width > term_width) {
             printf("\n");
             current_pos = 0;
         }
-        printf("%-*s", col_width, files[i]);
+        print_colored_filename(files[i], dir_path);
+        for (int p = name_len; p < col_width; p++) {
+            printf(" ");
+        }
         current_pos += col_width;
     }
     printf("\n");
@@ -177,7 +240,7 @@ void do_horizontal_display(char **files, int count, size_t max_len) {
 
 int main(int argc, char *argv[]) {
     int opt;
-    int display_mode = 0; 
+    int display_mode = 0;
     int show_hidden = 0;
 
     opterr = 0;
@@ -235,9 +298,9 @@ int main(int argc, char *argv[]) {
     if (display_mode == 1) {
         do_long_listing(files, count, dir_path);
     } else if (display_mode == 2) {
-        do_horizontal_display(files, count, max_len);
+        do_horizontal_display(files, count, max_len, dir_path);
     } else {
-        do_column_display(files, count, max_len);
+        do_column_display(files, count, max_len, dir_path);
     }
 
     for (int i = 0; i < count; i++) {
