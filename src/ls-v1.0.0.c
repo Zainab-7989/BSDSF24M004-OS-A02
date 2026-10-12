@@ -138,9 +138,7 @@ void do_column_display(const char *dir_path, int show_hidden) {
 
         files[count] = strdup(entry->d_name);
         size_t len = strlen(entry->d_name);
-        if (len > max_len) {
-            max_len = len;
-        }
+        if (len > max_len) max_len = len;
         count++;
     }
     closedir(dir);
@@ -180,25 +178,90 @@ void do_column_display(const char *dir_path, int show_hidden) {
         printf("\n");
     }
 
-    for (int i = 0; i < count; i++) {
-        free(files[i]);
+    for (int i = 0; i < count; i++) free(files[i]);
+    free(files);
+}
+
+void do_horizontal_display(const char *dir_path, int show_hidden) {
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        perror("opendir");
+        return;
     }
+
+    int count = 0;
+    int capacity = 10;
+    char **files = malloc(capacity * sizeof(char *));
+    size_t max_len = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!show_hidden && entry->d_name[0] == '.') continue;
+
+        if (count >= capacity) {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char *));
+        }
+
+        files[count] = strdup(entry->d_name);
+        size_t len = strlen(entry->d_name);
+        if (len > max_len) max_len = len;
+        count++;
+    }
+    closedir(dir);
+
+    if (count == 0) {
+        free(files);
+        return;
+    }
+
+    int term_width = 80;
+#ifndef _WIN32
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+        term_width = w.ws_col;
+    }
+#else
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        term_width = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    }
+#endif
+
+    int spacing = 2;
+    int col_width = max_len + spacing;
+    int current_pos = 0;
+
+    for (int i = 0; i < count; i++) {
+        if (current_pos + col_width > term_width) {
+            printf("\n");
+            current_pos = 0;
+        }
+        printf("%-*s", col_width, files[i]);
+        current_pos += col_width;
+    }
+    printf("\n");
+
+    for (int i = 0; i < count; i++) free(files[i]);
     free(files);
 }
 
 int main(int argc, char *argv[]) {
     int opt;
-    int long_listing = 0;
+    int display_mode = 0; 
     int show_hidden = 0;
 
     opterr = 0;
     optind = 1;
 
-    while ((opt = getopt(argc, argv, "1la")) != -1) {
+    while ((opt = getopt(argc, argv, "1lax")) != -1) {
         switch (opt) {
             case '1':
             case 'l':
-                long_listing = 1;
+                display_mode = 1;
+                break;
+            case 'x':
+                display_mode = 2;
                 break;
             case 'a':
                 show_hidden = 1;
@@ -208,8 +271,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (long_listing) {
+    if (display_mode == 1) {
         do_long_listing(".", show_hidden);
+    } else if (display_mode == 2) {
+        do_horizontal_display(".", show_hidden);
     } else {
         do_column_display(".", show_hidden);
     }
