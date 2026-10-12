@@ -238,36 +238,11 @@ void do_horizontal_display(char **files, int count, size_t max_len, const char *
     printf("\n");
 }
 
-int main(int argc, char *argv[]) {
-    int opt;
-    int display_mode = 0;
-    int show_hidden = 0;
-
-    opterr = 0;
-    optind = 1;
-
-    while ((opt = getopt(argc, argv, "1lax")) != -1) {
-        switch (opt) {
-            case '1':
-            case 'l':
-                display_mode = 1;
-                break;
-            case 'x':
-                display_mode = 2;
-                break;
-            case 'a':
-                show_hidden = 1;
-                break;
-            default:
-                break;
-        }
-    }
-
-    const char *dir_path = ".";
+void do_ls_recursive(const char *dir_path, int display_mode, int show_hidden, int recursive_flag) {
     DIR *dir = opendir(dir_path);
     if (dir == NULL) {
         perror("opendir");
-        return 1;
+        return;
     }
 
     int count = 0;
@@ -295,6 +270,8 @@ int main(int argc, char *argv[]) {
         qsort(files, count, sizeof(char *), compare_strings);
     }
 
+    printf("%s:\n", dir_path);
+
     if (display_mode == 1) {
         do_long_listing(files, count, dir_path);
     } else if (display_mode == 2) {
@@ -303,10 +280,64 @@ int main(int argc, char *argv[]) {
         do_column_display(files, count, max_len, dir_path);
     }
 
+    if (recursive_flag) {
+        for (int i = 0; i < count; i++) {
+            if (strcmp(files[i], ".") == 0 || strcmp(files[i], "..") == 0) continue;
+
+            char fullpath[1024];
+            snprintf(fullpath, sizeof(fullpath), "%s/%s", dir_path, files[i]);
+
+            struct stat file_stat;
+            if (lstat(fullpath, &file_stat) == 0) {
+                if (S_ISDIR(file_stat.st_mode)) {
+                    printf("\n");
+                    do_ls_recursive(fullpath, display_mode, show_hidden, recursive_flag);
+                }
+            }
+        }
+    }
+
     for (int i = 0; i < count; i++) {
         free(files[i]);
     }
     free(files);
+}
+
+int main(int argc, char *argv[]) {
+    int opt;
+    int display_mode = 0; 
+    int show_hidden = 0;
+    int recursive_flag = 0;
+
+    opterr = 0;
+    optind = 1;
+
+    while ((opt = getopt(argc, argv, "1laxR")) != -1) {
+        switch (opt) {
+            case '1':
+            case 'l':
+                display_mode = 1;
+                break;
+            case 'x':
+                display_mode = 2;
+                break;
+            case 'a':
+                show_hidden = 1;
+                break;
+            case 'R':
+                recursive_flag = 1;
+                break;
+            default:
+                break;
+        }
+    }
+
+    const char *target_dir = ".";
+    if (optind < argc) {
+        target_dir = argv[optind];
+    }
+
+    do_ls_recursive(target_dir, display_mode, show_hidden, recursive_flag);
 
     return 0;
 }
