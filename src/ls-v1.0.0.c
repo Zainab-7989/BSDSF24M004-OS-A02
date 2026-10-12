@@ -57,21 +57,18 @@ void print_permissions(mode_t mode) {
     printf("%s ", perms);
 }
 
-void do_long_listing(const char *dir_path, int show_hidden) {
-    DIR *dir = opendir(dir_path);
-    if (dir == NULL) {
-        perror("opendir");
-        return;
-    }
+int compare_strings(const void *a, const void *b) {
+    const char *str1 = *(const char **)a;
+    const char *str2 = *(const char **)b;
+    return strcmp(str1, str2);
+}
 
-    struct dirent *entry;
+void do_long_listing(char **files, int count, const char *dir_path) {
     struct stat file_stat;
 
-    while ((entry = readdir(dir)) != NULL) {
-        if (!show_hidden && entry->d_name[0] == '.') continue;
-
+    for (int i = 0; i < count; i++) {
         char fullpath[1024];
-        snprintf(fullpath, sizeof(fullpath), "%s/%s", dir_path, entry->d_name);
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", dir_path, files[i]);
 
         if (lstat(fullpath, &file_stat) == -1) {
             perror("lstat");
@@ -109,44 +106,12 @@ void do_long_listing(const char *dir_path, int show_hidden) {
             printf("%s ", timebuf + 4);
         }
 
-        printf("%s\n", entry->d_name);
+        printf("%s\n", files[i]);
     }
-
-    closedir(dir);
 }
 
-void do_column_display(const char *dir_path, int show_hidden) {
-    DIR *dir = opendir(dir_path);
-    if (dir == NULL) {
-        perror("opendir");
-        return;
-    }
-
-    int count = 0;
-    int capacity = 10;
-    char **files = malloc(capacity * sizeof(char *));
-    size_t max_len = 0;
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (!show_hidden && entry->d_name[0] == '.') continue;
-
-        if (count >= capacity) {
-            capacity *= 2;
-            files = realloc(files, capacity * sizeof(char *));
-        }
-
-        files[count] = strdup(entry->d_name);
-        size_t len = strlen(entry->d_name);
-        if (len > max_len) max_len = len;
-        count++;
-    }
-    closedir(dir);
-
-    if (count == 0) {
-        free(files);
-        return;
-    }
+void do_column_display(char **files, int count, size_t max_len) {
+    if (count == 0) return;
 
     int term_width = 80;
 #ifndef _WIN32
@@ -177,43 +142,10 @@ void do_column_display(const char *dir_path, int show_hidden) {
         }
         printf("\n");
     }
-
-    for (int i = 0; i < count; i++) free(files[i]);
-    free(files);
 }
 
-void do_horizontal_display(const char *dir_path, int show_hidden) {
-    DIR *dir = opendir(dir_path);
-    if (dir == NULL) {
-        perror("opendir");
-        return;
-    }
-
-    int count = 0;
-    int capacity = 10;
-    char **files = malloc(capacity * sizeof(char *));
-    size_t max_len = 0;
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (!show_hidden && entry->d_name[0] == '.') continue;
-
-        if (count >= capacity) {
-            capacity *= 2;
-            files = realloc(files, capacity * sizeof(char *));
-        }
-
-        files[count] = strdup(entry->d_name);
-        size_t len = strlen(entry->d_name);
-        if (len > max_len) max_len = len;
-        count++;
-    }
-    closedir(dir);
-
-    if (count == 0) {
-        free(files);
-        return;
-    }
+void do_horizontal_display(char **files, int count, size_t max_len) {
+    if (count == 0) return;
 
     int term_width = 80;
 #ifndef _WIN32
@@ -241,9 +173,6 @@ void do_horizontal_display(const char *dir_path, int show_hidden) {
         current_pos += col_width;
     }
     printf("\n");
-
-    for (int i = 0; i < count; i++) free(files[i]);
-    free(files);
 }
 
 int main(int argc, char *argv[]) {
@@ -271,13 +200,50 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (display_mode == 1) {
-        do_long_listing(".", show_hidden);
-    } else if (display_mode == 2) {
-        do_horizontal_display(".", show_hidden);
-    } else {
-        do_column_display(".", show_hidden);
+    const char *dir_path = ".";
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        perror("opendir");
+        return 1;
     }
+
+    int count = 0;
+    int capacity = 10;
+    char **files = malloc(capacity * sizeof(char *));
+    size_t max_len = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!show_hidden && entry->d_name[0] == '.') continue;
+
+        if (count >= capacity) {
+            capacity *= 2;
+            files = realloc(files, capacity * sizeof(char *));
+        }
+
+        files[count] = strdup(entry->d_name);
+        size_t len = strlen(entry->d_name);
+        if (len > max_len) max_len = len;
+        count++;
+    }
+    closedir(dir);
+
+    if (count > 0) {
+        qsort(files, count, sizeof(char *), compare_strings);
+    }
+
+    if (display_mode == 1) {
+        do_long_listing(files, count, dir_path);
+    } else if (display_mode == 2) {
+        do_horizontal_display(files, count, max_len);
+    } else {
+        do_column_display(files, count, max_len);
+    }
+
+    for (int i = 0; i < count; i++) {
+        free(files[i]);
+    }
+    free(files);
 
     return 0;
 }
